@@ -1,15 +1,10 @@
 FROM node:22-slim
-
 WORKDIR /app
-
 COPY package.json package-lock.json ./
-RUN npm ci --production=false
-
+RUN npm ci
 COPY src/ src/
 COPY tsconfig.json ./
-
 RUN mkdir -p transcripts
-
+ENV PORT=8080
 EXPOSE 8080
-
 CMD ["npx", "tsx", "src/server.ts"]
