@@ -65,14 +65,18 @@ export interface GameEvent {
 
 export interface PlayerState {
   address: string;
+  name: string;
   role: Role;
   alive: boolean;
+  isBot: boolean;
 }
 
 export interface GameConfig {
   maxPlayers: number;
-  dayDurationMs: number;        // total time for free-form discussion
-  maxMessagesPerPlayer: number;  // max messages per player per day
+  minHumansToStart: number;       // minimum humans before backfilling with bots
+  lobbyWaitMs: number;            // how long to wait for humans before backfilling
+  dayDurationMs: number;
+  maxMessagesPerPlayer: number;
   nightTimeoutMs: number;
   voteTimeoutMs: number;
   wolfChatTimeoutMs: number;
@@ -81,8 +85,10 @@ export interface GameConfig {
 
 export const DEFAULT_CONFIG: GameConfig = {
   maxPlayers: 7,
-  dayDurationMs: 90_000,        // 90 seconds of free-form discussion
-  maxMessagesPerPlayer: 3,       // each player can send up to 3 messages per day
+  minHumansToStart: 1,            // even 1 human triggers backfill
+  lobbyWaitMs: 30_000,            // wait 30s for more humans, then fill with bots
+  dayDurationMs: 90_000,
+  maxMessagesPerPlayer: 3,
   nightTimeoutMs: 60_000,
   voteTimeoutMs: 30_000,
   wolfChatTimeoutMs: 30_000,

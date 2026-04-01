@@ -40,12 +40,12 @@ export class WerewolfEngine {
     }
   }
 
-  addPlayer(address: string): boolean {
+  addPlayer(address: string, name?: string, isBot = false): boolean {
     if (this.phase !== Phase.Lobby) return false;
     if (this.players.length >= this.config.maxPlayers) return false;
     if (this.players.some((p) => p.address === address)) return false;
 
-    this.players.push({ address, role: Role.Villager, alive: true });
+    this.players.push({ address, name: name || address.slice(0, 10), role: Role.Villager, alive: true, isBot });
 
     this.emit({
       type: "waiting_for_players",
@@ -96,6 +96,7 @@ export class WerewolfEngine {
       gameId: this.gameId,
       data: {
         players: this.players.map((p) => p.address),
+        playerNames: Object.fromEntries(this.players.map((p) => [p.address, p.name])),
         round: this.round,
       },
     });
@@ -530,7 +531,8 @@ export class WerewolfEngine {
       gameId: this.gameId,
       phase: this.phase,
       round: this.round,
-      players: this.players.map((p) => ({ address: p.address, alive: p.alive })),
+      players: this.players.map((p) => ({ address: p.address, name: p.name, alive: p.alive, isBot: p.isBot })),
+      playerNames: Object.fromEntries(this.players.map((p) => [p.address, p.name])),
       transcript: this.transcript,
     };
   }

@@ -1,0 +1,86 @@
+{
+  "0xArena_Player4_00000000000000": {
+    "wins": 1,
+    "losses": 1,
+    "gamesPlayed": 2,
+    "lastSeen": "2026-04-01T06:17:10.624Z"
+  },
+  "0xArena_Player6_00000000000000": {
+    "wins": 1,
+    "losses": 1,
+    "gamesPlayed": 2,
+    "lastSeen": "2026-04-01T06:17:10.624Z"
+  },
+  "0xArena_Player1_00000000000000": {
+    "wins": 1,
+    "losses": 1,
+    "gamesPlayed": 2,
+    "lastSeen": "2026-04-01T06:17:10.624Z"
+  },
+  "0xArena_Player2_00000000000000": {
+    "wins": 0,
+    "losses": 2,
+    "gamesPlayed": 2,
+    "lastSeen": "2026-04-01T06:17:10.624Z"
+  },
+  "0xArena_Player3_00000000000000": {
+    "wins": 0,
+    "losses": 2,
+    "gamesPlayed": 2,
+    "lastSeen": "2026-04-01T06:17:10.624Z"
+  },
+  "0xArena_Player5_00000000000000": {
+    "wins": 1,
+    "losses": 1,
+    "gamesPlayed": 2,
+    "lastSeen": "2026-04-01T06:17:10.624Z"
+  },
+  "0xArena_Player7_00000000000000": {
+    "wins": 0,
+    "losses": 2,
+    "gamesPlayed": 2,
+    "lastSeen": "2026-04-01T06:17:10.624Z"
+  },
+  "0xPlayer1_0aa746f91b9f66c236fd6e1fa372": {
+    "wins": 1,
+    "losses": 0,
+    "gamesPlayed": 1,
+    "lastSeen": "2026-04-01T16:11:08.579Z"
+  },
+  "0xPlayer2_2e88de226b7a237671cd19f7744e": {
+    "wins": 1,
+    "losses": 0,
+    "gamesPlayed": 1,
+    "lastSeen": "2026-04-01T16:11:08.579Z"
+  },
+  "0xPlayer3_ec2c1a9b02aa82ace6170a6df961": {
+    "wins": 0,
+    "losses": 1,
+    "gamesPlayed": 1,
+    "lastSeen": "2026-04-01T16:11:08.579Z"
+  },
+  "0xPlayer4_0cdb8124efd43829b919127e972a": {
+    "wins": 0,
+    "losses": 1,
+    "gamesPlayed": 1,
+    "lastSeen": "2026-04-01T16:11:08.579Z"
+  },
+  "0xPlayer5_ad6c69c041b1897a3558bcab12fc": {
+    "wins": 0,
+    "losses": 1,
+    "gamesPlayed": 1,
+    "lastSeen": "2026-04-01T16:11:08.579Z"
+  },
+  "0xPlayer6_a48b182e6d92ab2e361a81e81157": {
+    "wins": 0,
+    "losses": 1,
+    "gamesPlayed": 1,
+    "lastSeen": "2026-04-01T16:11:08.579Z"
+  },
+  "0xPlayer7_adb60d3b70e93d19fbb5adde5807": {
+    "wins": 0,
+    "losses": 1,
+    "gamesPlayed": 1,
+    "lastSeen": "2026-04-01T16:11:08.579Z"
+  }
+}

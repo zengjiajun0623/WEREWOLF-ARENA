@@ -3,11 +3,13 @@ import { createServer, type IncomingMessage, type ServerResponse } from "http";
 import { writeFileSync, mkdirSync } from "fs";
 import { WerewolfEngine } from "./engine.js";
 import { StatsTracker } from "./stats.js";
-import { Phase, type GameEvent } from "./types.js";
+import { BotBrain, nextBotName } from "./bot.js";
+import { Role, Phase, type GameEvent } from "./types.js";
 
 interface Client {
   ws: WebSocket;
   address: string;
+  name: string;
   gameId: string | null;
   isSpectator: boolean;
 }
@@ -20,8 +22,11 @@ export class WerewolfRelay {
   private playerGameMap: Map<string, string> = new Map();
 
   private timers: Map<string, NodeJS.Timeout> = new Map();
+  private lobbyTimers: Map<string, NodeJS.Timeout> = new Map();
   private heartbeatInterval: NodeJS.Timeout;
   private stats: StatsTracker;
+  private bots: Map<string, BotBrain> = new Map(); // address -> bot brain
+  private nameRegistry: Map<string, string> = new Map(); // address -> name
 
   constructor(port: number) {
     mkdirSync("transcripts", { recursive: true });
@@ -95,7 +100,7 @@ export class WerewolfRelay {
   }
 
   private handleConnection(ws: WebSocket) {
-    const client: Client = { ws, address: "", gameId: null, isSpectator: false };
+    const client: Client = { ws, address: "", name: "", gameId: null, isSpectator: false };
     this.clients.set(ws, client);
 
     ws.on("message", (data) => {
@@ -132,9 +137,11 @@ export class WerewolfRelay {
 
   private handleMessage(client: Client, msg: { type: string; data?: Record<string, unknown> }) {
     switch (msg.type) {
-      case "register":
+      case "register": {
         client.address = msg.data?.address as string;
-        this.send(client.ws, { type: "registered", data: { address: client.address } });
+        client.name = (msg.data?.name as string) || client.address.slice(0, 10);
+        this.nameRegistry.set(client.address, client.name);
+        this.send(client.ws, { type: "registered", data: { address: client.address, name: client.name } });
         // Reconnection check
         const existingGameId = this.playerGameMap.get(client.address);
         if (existingGameId) {
@@ -142,10 +149,11 @@ export class WerewolfRelay {
           if (game && game.phase !== Phase.Finished) {
             client.gameId = existingGameId;
             this.send(client.ws, { type: "reconnected", data: game.getGameState() });
-            console.log(`[${client.address.slice(0, 10)}] Reconnected to ${existingGameId}`);
+            console.log(`[${client.name}] Reconnected to ${existingGameId}`);
           }
         }
         break;
+      }
       case "join_game":
         this.handleJoinGame(client);
         break;
@@ -191,14 +199,44 @@ export class WerewolfRelay {
       game.onEvent((event) => this.handleGameEvent(event));
     }
 
-    if (!game.addPlayer(client.address)) {
+    if (!game.addPlayer(client.address, client.name)) {
       this.send(client.ws, { type: "error", data: { message: "could not join" } });
       return;
     }
 
     client.gameId = game.gameId;
     this.playerGameMap.set(client.address, game.gameId);
-    this.send(client.ws, { type: "joined", data: { gameId: game.gameId, playerCount: game.players.length } });
+    this.send(client.ws, { type: "joined", data: { gameId: game.gameId, name: client.name, playerCount: game.players.length } });
+    console.log(`[${client.name}] Joined ${game.gameId} (${game.players.length}/${game.config.maxPlayers})`);
+
+    // Start lobby backfill timer if we have enough humans
+    const humanCount = game.players.filter((p) => !p.isBot).length;
+    if (humanCount >= game.config.minHumansToStart && game.phase === Phase.Lobby) {
+      if (!this.lobbyTimers.has(game.gameId)) {
+        console.log(`[${game.gameId}] ${humanCount} humans in lobby. Backfilling in ${game.config.lobbyWaitMs / 1000}s...`);
+        this.lobbyTimers.set(game.gameId, setTimeout(() => {
+          this.backfillWithBots(game);
+        }, game.config.lobbyWaitMs));
+      }
+    }
+  }
+
+  private backfillWithBots(game: WerewolfEngine) {
+    this.lobbyTimers.delete(game.gameId);
+    if (game.phase !== Phase.Lobby) return;
+
+    const slotsNeeded = game.config.maxPlayers - game.players.length;
+    if (slotsNeeded <= 0) return;
+
+    console.log(`[${game.gameId}] Backfilling ${slotsNeeded} bot(s)...`);
+
+    for (let i = 0; i < slotsNeeded; i++) {
+      const botName = nextBotName();
+      const botAddress = `bot_${botName.toLowerCase()}_${Date.now()}_${i}`;
+      const bot = new BotBrain(botAddress);
+      this.bots.set(botAddress, bot);
+      game.addPlayer(botAddress, `${botName} (Bot)`, true);
+    }
   }
 
   private handleSpectate(client: Client, gameId: string) {
@@ -240,7 +278,14 @@ export class WerewolfRelay {
       for (const [addr, gid] of this.playerGameMap) {
         if (gid === event.gameId) this.playerGameMap.delete(addr);
       }
+      // Clean up bots
+      for (const p of game.players) {
+        if (p.isBot) this.bots.delete(p.address);
+      }
     }
+
+    // Handle bot actions
+    this.handleBotActions(event, game);
 
     // Route events
     for (const [, client] of this.clients) {
@@ -267,6 +312,91 @@ export class WerewolfRelay {
 
       // Public: everything else goes to all players + spectators
       this.send(client.ws, event);
+    }
+  }
+
+  private handleBotActions(event: GameEvent, game: WerewolfEngine) {
+    const botPlayers = game.players.filter((p) => p.isBot && p.alive);
+    if (botPlayers.length === 0) return;
+
+    if (event.type === "role_assigned") {
+      const addr = event.data.player as string;
+      const bot = this.bots.get(addr);
+      if (bot) {
+        const roleNum = Role[event.data.role as keyof typeof Role];
+        bot.setRole(roleNum, (event.data.teammates as string[]) || []);
+      }
+      return;
+    }
+
+    if (event.type === "seer_result") {
+      const bot = this.bots.get(event.data.seer as string);
+      if (bot) bot.setSeerResult(event.data.target as string, event.data.isWerewolf as boolean);
+      return;
+    }
+
+    if (event.type === "wolf_chat_start") {
+      for (const p of botPlayers) {
+        const bot = this.bots.get(p.address);
+        if (bot && p.role === Role.Werewolf) {
+          const alive = (event.data.alivePlayers as string[]).filter((a) => a !== p.address);
+          const targets = alive.filter((a) => !game.getWerewolves().some((w) => w.address === a));
+          setTimeout(() => game.submitWolfChat(p.address, bot.wolfChat(targets)), 500 + Math.random() * 2000);
+        }
+      }
+      return;
+    }
+
+    if (event.type === "night_start") {
+      const alive = event.data.alivePlayers as string[];
+      for (const p of botPlayers) {
+        const bot = this.bots.get(p.address);
+        if (!bot) continue;
+        let target: string;
+        if (p.role === Role.Werewolf) {
+          const targets = alive.filter((a) => a !== p.address && !game.getWerewolves().some((w) => w.address === a));
+          target = bot.wolfKill(targets);
+        } else if (p.role === Role.Seer) {
+          const targets = alive.filter((a) => a !== p.address);
+          target = bot.seerInspect(targets);
+        } else if (p.role === Role.Doctor) {
+          const candidates = alive.filter((a) => a !== p.address);
+          target = bot.doctorProtect(candidates);
+        } else continue;
+        setTimeout(() => game.submitNightAction(p.address, target), 500 + Math.random() * 2000);
+      }
+      return;
+    }
+
+    if (event.type === "day_start") {
+      for (const p of botPlayers) {
+        const bot = this.bots.get(p.address);
+        if (!bot) continue;
+        bot.resetDay();
+        // Bots send messages with staggered delays
+        const alive = (event.data.alivePlayers as string[]);
+        const maxMsg = event.data.maxMessages as number;
+        for (let m = 0; m < maxMsg; m++) {
+          const delay = 3000 + Math.random() * 15000 + m * 10000;
+          setTimeout(() => {
+            if (game.phase === Phase.Day) {
+              game.submitDayMessage(p.address, bot.speak(alive));
+            }
+          }, delay);
+        }
+      }
+      return;
+    }
+
+    if (event.type === "vote_start") {
+      for (const p of botPlayers) {
+        const bot = this.bots.get(p.address);
+        if (!bot) continue;
+        const alive = (event.data.alivePlayers as string[]).filter((a) => a !== p.address);
+        const target = bot.vote(alive);
+        setTimeout(() => game.submitVote(p.address, target), 1000 + Math.random() * 3000);
+      }
+      return;
     }
   }
 

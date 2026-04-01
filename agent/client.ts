@@ -11,6 +11,7 @@ export class WerewolfClient {
   private ws: WebSocket | null = null;
   private brain: Brain;
   private address: string;
+  private agentName: string;
   private relayUrl: string;
   private shouldReconnect = true;
   private reconnectAttempts = 0;
@@ -32,8 +33,9 @@ export class WerewolfClient {
   private dayActive = false;
   private dayTimer: NodeJS.Timeout | null = null;
 
-  constructor(relayUrl: string, address: string, brain: Brain) {
+  constructor(relayUrl: string, address: string, brain: Brain, name?: string) {
     this.address = address;
+    this.agentName = name || address.slice(0, 10);
     this.brain = brain;
     this.relayUrl = relayUrl;
     this.connect();
@@ -44,7 +46,7 @@ export class WerewolfClient {
 
     this.ws.on("open", () => {
       this.reconnectAttempts = 0;
-      this.send({ type: "register", data: { address: this.address } });
+      this.send({ type: "register", data: { address: this.address, name: this.agentName } });
       if (!this.gameId) {
         setTimeout(() => this.send({ type: "join_game" }), 500);
       }

@@ -1,0 +1,10 @@
+FROM node:22-slim
+WORKDIR /app
+COPY relay/package.json relay/package-lock.json ./
+RUN npm ci
+COPY relay/src/ src/
+COPY relay/tsconfig.json ./
+RUN mkdir -p transcripts
+ENV PORT=8080
+EXPOSE 8080
+CMD ["npx", "tsx", "src/server.ts"]

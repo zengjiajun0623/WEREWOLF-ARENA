@@ -28,6 +28,7 @@ export function useWebSocket(url: string) {
   const [events, setEvents] = useState<GameEvent[]>([]);
   const [games, setGames] = useState<GameInfo[]>([]);
   const [activeGameId, setActiveGameId] = useState<string | null>(null);
+  const [playerNames, setPlayerNames] = useState<Record<string, string>>({});
   const autoSpectated = useRef<Set<string>>(new Set());
 
   const spectate = useCallback((gameId: string) => {
@@ -77,6 +78,11 @@ export function useWebSocket(url: string) {
           return;
         }
 
+        // Extract player names from game events
+        if (event.data?.playerNames) {
+          setPlayerNames((prev) => ({ ...prev, ...(event.data.playerNames as Record<string, string>) }));
+        }
+
         setEvents((prev) => [...prev, event]);
       } catch {
         // ignore
@@ -98,5 +104,5 @@ export function useWebSocket(url: string) {
     };
   }, [url]);
 
-  return { connected, events, games, activeGameId, spectate };
+  return { connected, events, games, activeGameId, playerNames, spectate };
 }

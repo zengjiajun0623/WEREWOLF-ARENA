@@ -9,7 +9,7 @@ import Link from "next/link";
 const RELAY_URL = process.env.NEXT_PUBLIC_RELAY_URL || "ws://localhost:8080";
 
 export default function PlayPage() {
-  const { connected, events, games, activeGameId, spectate } = useWebSocket(RELAY_URL);
+  const { connected, events, games, activeGameId, playerNames, spectate } = useWebSocket(RELAY_URL);
 
   return (
     <div className="flex h-screen">
@@ -47,7 +47,7 @@ export default function PlayPage() {
           </div>
           <div className="text-xs text-gray-600">{events.length} events</div>
         </div>
-        <GameTranscript events={events} />
+        <GameTranscript events={events} playerNames={playerNames} />
       </div>
 
       {/* Right sidebar — players */}

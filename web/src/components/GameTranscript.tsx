@@ -3,8 +3,6 @@
 import { useEffect, useRef } from "react";
 import type { GameEvent } from "../hooks/useWebSocket";
 
-function short(addr: string): string { return addr?.slice(0, 10) || "???"; }
-
 function RoleTag({ role }: { role: string }) {
   const colors: Record<string, string> = {
     Werewolf: "text-red-400 bg-red-900/30",
@@ -19,7 +17,7 @@ function RoleTag({ role }: { role: string }) {
   );
 }
 
-function EventLine({ event }: { event: GameEvent }) {
+function EventLine({ event, name }: { event: GameEvent; name: (addr: string) => string }) {
   switch (event.type) {
     case "game_start":
       return (
@@ -49,14 +47,12 @@ function EventLine({ event }: { event: GameEvent }) {
         </div>
       );
 
-    case "night_result": {
-      const killed = event.data.killed as string;
+    case "night_result":
       return (
         <div className="text-red-300 py-1">
-          {short(killed)} was killed in the night.
+          <span className="font-bold">{name(event.data.killed as string)}</span> was killed in the night.
         </div>
       );
-    }
 
     case "day_start":
       return (
@@ -69,7 +65,7 @@ function EventLine({ event }: { event: GameEvent }) {
       const msg = event.data.message as { sender: string; content: string };
       return (
         <div className="py-1.5 pl-2 border-l-2 border-gray-700 hover:border-gray-500">
-          <span className="text-cyan-400 font-mono text-sm">[{short(msg.sender)}]</span>{" "}
+          <span className="text-cyan-400 font-mono text-sm font-bold">{name(msg.sender)}</span>{" "}
           <span className="text-gray-200">{msg.content}</span>
         </div>
       );
@@ -83,12 +79,12 @@ function EventLine({ event }: { event: GameEvent }) {
           <div className="flex flex-wrap gap-x-3 gap-y-0.5 mb-1">
             {Object.entries(votes).map(([voter, target]) => (
               <span key={voter} className="text-xs text-gray-500">
-                {short(voter)} → {short(target)}
+                {name(voter)} → {name(target)}
               </span>
             ))}
           </div>
           {eliminated ? (
-            <div className="text-red-400 font-bold">{short(eliminated)} was eliminated by vote.</div>
+            <div className="text-red-400 font-bold">{name(eliminated)} was eliminated by vote.</div>
           ) : (
             <div className="text-gray-400">Tie — no elimination.</div>
           )}
@@ -99,7 +95,7 @@ function EventLine({ event }: { event: GameEvent }) {
     case "player_eliminated":
       return (
         <div className="text-gray-300">
-          {short(event.data.eliminated as string)} was eliminated.
+          <span className="font-bold">{name(event.data.eliminated as string)}</span> was eliminated.
         </div>
       );
 
@@ -114,10 +110,10 @@ function EventLine({ event }: { event: GameEvent }) {
               ? <span className="text-green-400">Villagers Win!</span>
               : <span className="text-red-400">Werewolves Win!</span>}
           </div>
-          <div className="flex flex-wrap justify-center gap-2">
+          <div className="flex flex-wrap justify-center gap-3">
             {Object.entries(roles).map(([addr, role]) => (
               <div key={addr} className="text-sm">
-                <span className="text-gray-400 font-mono">{short(addr)}</span>{" "}
+                <span className="text-gray-300 font-mono">{name(addr)}</span>{" "}
                 <RoleTag role={role} />
               </div>
             ))}
@@ -129,7 +125,7 @@ function EventLine({ event }: { event: GameEvent }) {
     case "spectating":
       return (
         <div className="text-gray-500 text-center py-1 text-xs">
-          Spectating {event.data.gameId as string} · {event.data.phase as string} · round {event.data.round as number}
+          Spectating {event.data.gameId as string}
         </div>
       );
 
@@ -138,7 +134,13 @@ function EventLine({ event }: { event: GameEvent }) {
   }
 }
 
-export function GameTranscript({ events }: { events: GameEvent[] }) {
+export function GameTranscript({
+  events,
+  playerNames = {},
+}: {
+  events: GameEvent[];
+  playerNames?: Record<string, string>;
+}) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -146,6 +148,8 @@ export function GameTranscript({ events }: { events: GameEvent[] }) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [events]);
+
+  const name = (addr: string) => playerNames[addr] || addr?.slice(0, 10) || "???";
 
   return (
     <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-1 font-mono text-sm">
@@ -155,7 +159,7 @@ export function GameTranscript({ events }: { events: GameEvent[] }) {
         </div>
       )}
       {events.map((event, i) => (
-        <EventLine key={i} event={event} />
+        <EventLine key={i} event={event} name={name} />
       ))}
     </div>
   );
