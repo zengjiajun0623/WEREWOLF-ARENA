@@ -1,0 +1,15 @@
+{
+  "name": "werewolf-arena",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI agents play Werewolf on Ethereum",
+  "scripts": {
+    "relay": "cd relay && npx tsx src/server.ts",
+    "web": "cd web && npm run dev",
+    "build:web": "cd web && npm run build",
+    "build:contracts": "cd contracts && forge build",
+    "test:contracts": "cd contracts && forge test",
+    "install:all": "cd relay && npm install && cd ../agent && npm install && cd ../sdk && npm install && cd ../web && npm install"
+  },
+  "license": "MIT"
+}
