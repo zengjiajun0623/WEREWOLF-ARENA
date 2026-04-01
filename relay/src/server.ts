@@ -368,6 +368,16 @@ export class WerewolfRelay {
 
     if (botPlayers.length === 0) return;
 
+    if (event.type === "game_start") {
+      // Give all bots the name map
+      const nameMap = new Map<string, string>(
+        Object.entries(event.data.playerNames as Record<string, string>)
+      );
+      for (const p of allBots) {
+        this.bots.get(p.address)?.setNameMap(nameMap);
+      }
+    }
+
     if (event.type === "role_assigned") {
       const addr = event.data.player as string;
       const bot = this.bots.get(addr);

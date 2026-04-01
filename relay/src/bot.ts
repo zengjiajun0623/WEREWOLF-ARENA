@@ -166,6 +166,7 @@ export class BotBrain {
   private suspicion: Map<string, number> = new Map(); // accumulated suspicion per player
   private voteHistory: Map<string, string[]> = new Map(); // who voted for whom each round
   private accusers: Map<string, string[]> = new Map();  // who accused whom during day chat
+  private nameMap: Map<string, string> = new Map();  // address -> display name
 
   constructor(address: string) {
     this.address = address;
@@ -174,6 +175,14 @@ export class BotBrain {
   setRole(role: Role, teammates: string[]) {
     this.role = role;
     this.teammates = teammates;
+  }
+
+  setNameMap(nameMap: Map<string, string>) {
+    this.nameMap = nameMap;
+  }
+
+  private name(address: string): string {
+    return this.nameMap.get(address) || address.slice(0, 10);
   }
 
   setSeerResult(target: string, isWerewolf: boolean) {
@@ -219,13 +228,13 @@ export class BotBrain {
 
   // Day: generate a message
   speak(alivePlayers: string[]): string {
-    const others = alivePlayers.filter((a) => a !== this.address);
+    const others = alivePlayers.filter((a) => a !== this.address).map((a) => this.name(a));
     const ctx: SpeakContext = {
       others,
       round: this.round,
-      knownRoles: this.knownRoles,
-      suspicion: this.suspicion,
-      deaths: this.deaths,
+      knownRoles: new Map([...this.knownRoles.entries()].map(([k, v]) => [this.name(k), v])),
+      suspicion: new Map([...this.suspicion.entries()].map(([k, v]) => [this.name(k), v])),
+      deaths: this.deaths.map((d) => this.name(d)),
       role: this.role,
       aliveCount: alivePlayers.length,
     };
@@ -319,7 +328,8 @@ export class BotBrain {
 
   // Wolf chat
   wolfChat(targets: string[]): string {
-    return pick(WOLF_CHAT_LINES)(targets, { deaths: this.deaths, round: this.round });
+    const namedTargets = targets.map((t) => this.name(t));
+    return pick(WOLF_CHAT_LINES)(namedTargets, { deaths: this.deaths.map((d) => this.name(d)), round: this.round });
   }
 
   resetDay() {
