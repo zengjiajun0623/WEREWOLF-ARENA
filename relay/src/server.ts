@@ -296,7 +296,8 @@ export class WerewolfRelay {
       this.saveTranscript(event);
       this.stats.recordGame(
         event.data.winners as string[],
-        event.data.losers as string[]
+        event.data.losers as string[],
+        this.nameRegistry
       );
       for (const [addr, gid] of this.playerGameMap) {
         if (gid === event.gameId) this.playerGameMap.delete(addr);

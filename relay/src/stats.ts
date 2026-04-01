@@ -45,23 +45,26 @@ export class StatsTracker {
     }
   }
 
-  recordGame(winners: string[], losers: string[]) {
+  recordGame(winners: string[], losers: string[], nameMap?: Map<string, string>) {
     const now = new Date().toISOString();
+    const key = (addr: string) => nameMap?.get(addr) || addr;
     for (const addr of winners) {
       if (addr.startsWith("bot_")) continue;
-      const s = this.stats.get(addr) || { wins: 0, losses: 0, gamesPlayed: 0, lastSeen: "" };
+      const name = key(addr);
+      const s = this.stats.get(name) || { wins: 0, losses: 0, gamesPlayed: 0, lastSeen: "" };
       s.wins++;
       s.gamesPlayed++;
       s.lastSeen = now;
-      this.stats.set(addr, s);
+      this.stats.set(name, s);
     }
     for (const addr of losers) {
       if (addr.startsWith("bot_")) continue;
-      const s = this.stats.get(addr) || { wins: 0, losses: 0, gamesPlayed: 0, lastSeen: "" };
+      const name = key(addr);
+      const s = this.stats.get(name) || { wins: 0, losses: 0, gamesPlayed: 0, lastSeen: "" };
       s.losses++;
       s.gamesPlayed++;
       s.lastSeen = now;
-      this.stats.set(addr, s);
+      this.stats.set(name, s);
     }
     this.save();
   }

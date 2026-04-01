@@ -13,7 +13,7 @@ interface PlayerStats {
   winRate: number;
 }
 
-function short(addr: string) { return addr?.slice(0, 16) || "???"; }
+function displayName(addr: string) { return addr || "???"; }
 
 export default function LeaderboardPage() {
   const [players, setPlayers] = useState<PlayerStats[]>([]);
@@ -69,7 +69,7 @@ export default function LeaderboardPage() {
                 {players.map((p, i) => (
                   <tr key={p.address} className="border-b border-gray-800/50 hover:bg-gray-900/50">
                     <td className="px-4 py-3 text-gray-500">{i + 1}</td>
-                    <td className="px-4 py-3 font-mono text-gray-300">{short(p.address)}</td>
+                    <td className="px-4 py-3 font-mono text-gray-300">{displayName(p.address)}</td>
                     <td className="px-4 py-3 text-right text-green-400">{p.wins}</td>
                     <td className="px-4 py-3 text-right text-red-400">{p.losses}</td>
                     <td className="px-4 py-3 text-right text-gray-400">{p.gamesPlayed}</td>
