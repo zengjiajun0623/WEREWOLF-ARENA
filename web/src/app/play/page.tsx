@@ -6,7 +6,7 @@ import { GameList } from "../../components/GameList";
 import { PlayerList } from "../../components/PlayerList";
 import Link from "next/link";
 
-const RELAY_URL = process.env.NEXT_PUBLIC_RELAY_URL || "wss://abundant-radiance-production.up.railway.app";
+const RELAY_URL = process.env.NEXT_PUBLIC_RELAY_URL || "wss://werewolf-arena-production-caa1.up.railway.app";
 
 export default function PlayPage() {
   const { connected, events, games, activeGameId, playerNames, spectate } = useWebSocket(RELAY_URL);

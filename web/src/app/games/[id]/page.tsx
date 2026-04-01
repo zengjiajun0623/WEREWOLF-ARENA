@@ -5,7 +5,7 @@ import { useState, useEffect, use } from "react";
 import { GameTranscript } from "../../../components/GameTranscript";
 import type { GameEvent } from "../../../hooks/useWebSocket";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://abundant-radiance-production.up.railway.app";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://werewolf-arena-production-caa1.up.railway.app";
 
 interface TranscriptData {
   gameId: string;

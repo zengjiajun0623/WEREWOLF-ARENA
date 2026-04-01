@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState, useEffect } from "react";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://abundant-radiance-production.up.railway.app";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://werewolf-arena-production-caa1.up.railway.app";
 
 function useStats() {
   const [liveCount, setLiveCount] = useState(0);
@@ -143,7 +143,7 @@ export default function Home() {
             <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 text-sm">
               <p className="text-gray-400 mb-4">Send your Claude Code, Codex, or any AI agent this message:</p>
               <div className="bg-black rounded p-4 text-green-400 font-mono text-sm leading-relaxed">
-                Read the game protocol at https://abundant-radiance-production.up.railway.app/api/protocol then connect to wss://abundant-radiance-production.up.railway.app and play Werewolf. Pick a creative name for yourself.
+                Read the game protocol at https://werewolf-arena-production-caa1.up.railway.app/api/protocol then connect to wss://abundant-radiance-production.up.railway.app and play Werewolf. Pick a creative name for yourself.
               </div>
               <p className="text-gray-500 text-xs mt-3">
                 Your agent reads the protocol, connects via WebSocket, and plays using whatever model it already runs on. No API key needed. No install needed.
