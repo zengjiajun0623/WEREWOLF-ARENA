@@ -1,6 +1,8 @@
 import { WebSocketServer, WebSocket } from "ws";
+import { createServer, type IncomingMessage, type ServerResponse } from "http";
 import { writeFileSync, mkdirSync } from "fs";
 import { WerewolfEngine } from "./engine.js";
+import { StatsTracker } from "./stats.js";
 import { Phase, type GameEvent } from "./types.js";
 
 interface Client {
@@ -19,17 +21,77 @@ export class WerewolfRelay {
 
   private timers: Map<string, NodeJS.Timeout> = new Map();
   private heartbeatInterval: NodeJS.Timeout;
+  private stats: StatsTracker;
 
   constructor(port: number) {
     mkdirSync("transcripts", { recursive: true });
-    this.wss = new WebSocketServer({ port });
+    this.stats = new StatsTracker();
+
+    // HTTP server for REST API + WebSocket upgrade
+    const httpServer = createServer((req, res) => this.handleHttp(req, res));
+    this.wss = new WebSocketServer({ server: httpServer });
     this.wss.on("connection", (ws) => this.handleConnection(ws));
     this.heartbeatInterval = setInterval(() => {
       for (const [ws] of this.clients) {
         if (ws.readyState === WebSocket.OPEN) ws.ping();
       }
     }, 30_000);
-    console.log(`Werewolf relay running on ws://localhost:${port}`);
+
+    httpServer.listen(port, () => {
+      console.log(`Werewolf relay running on http://localhost:${port}`);
+      console.log(`  WebSocket: ws://localhost:${port}`);
+      console.log(`  API: http://localhost:${port}/api/stats, /api/games`);
+    });
+  }
+
+  private handleHttp(req: IncomingMessage, res: ServerResponse) {
+    // CORS headers
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+    if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
+
+    const url = req.url || "/";
+
+    if (url === "/api/stats") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ leaderboard: this.stats.getLeaderboard() }));
+      return;
+    }
+
+    if (url === "/api/games") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ games: StatsTracker.getGameList() }));
+      return;
+    }
+
+    if (url.startsWith("/api/games/")) {
+      const filename = decodeURIComponent(url.slice("/api/games/".length));
+      const transcript = StatsTracker.getGameTranscript(filename);
+      if (transcript) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(transcript));
+      } else {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "game not found" }));
+      }
+      return;
+    }
+
+    if (url === "/api/live") {
+      const list = [...this.games.entries()].map(([id, g]) => ({
+        gameId: id, phase: g.phase, playerCount: g.players.length,
+        alivePlayers: g.getAlivePlayers().length, round: g.round,
+      }));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ games: list }));
+      return;
+    }
+
+    // Default: 404
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "not found" }));
   }
 
   private handleConnection(ws: WebSocket) {
@@ -171,6 +233,10 @@ export class WerewolfRelay {
       this.setTimer(event.gameId, () => game.forceVoteResolve(), game.config.voteTimeoutMs);
     } else if (event.type === "game_over") {
       this.saveTranscript(event);
+      this.stats.recordGame(
+        event.data.winners as string[],
+        event.data.losers as string[]
+      );
       for (const [addr, gid] of this.playerGameMap) {
         if (gid === event.gameId) this.playerGameMap.delete(addr);
       }
