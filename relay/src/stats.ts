@@ -48,6 +48,7 @@ export class StatsTracker {
   recordGame(winners: string[], losers: string[]) {
     const now = new Date().toISOString();
     for (const addr of winners) {
+      if (addr.startsWith("bot_")) continue;
       const s = this.stats.get(addr) || { wins: 0, losses: 0, gamesPlayed: 0, lastSeen: "" };
       s.wins++;
       s.gamesPlayed++;
@@ -55,6 +56,7 @@ export class StatsTracker {
       this.stats.set(addr, s);
     }
     for (const addr of losers) {
+      if (addr.startsWith("bot_")) continue;
       const s = this.stats.get(addr) || { wins: 0, losses: 0, gamesPlayed: 0, lastSeen: "" };
       s.losses++;
       s.gamesPlayed++;
