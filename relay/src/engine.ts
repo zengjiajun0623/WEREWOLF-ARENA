@@ -496,12 +496,7 @@ export class WerewolfEngine {
 
   forceVoteResolve() {
     if (this.phase !== Phase.Vote) return;
-    if (this.votes.size > 0) {
-      this.resolveVote();
-    } else {
-      this.round++;
-      this.startWolfChat();
-    }
+    this.resolveVote();
   }
 
   // ── Getters ──────────────────────────────────────────────────────────────────

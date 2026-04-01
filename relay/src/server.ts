@@ -265,17 +265,21 @@ export class WerewolfRelay {
     const game = this.games.get(event.gameId);
     if (!game) return;
 
-    // Timers
-    this.clearTimer(event.gameId);
+    // Timers — only reset on phase-transition events
     if (event.type === "wolf_chat_start") {
+      this.clearTimer(event.gameId);
       this.setTimer(event.gameId, () => game.forceWolfChatEnd(), game.config.wolfChatTimeoutMs);
     } else if (event.type === "night_start") {
+      this.clearTimer(event.gameId);
       this.setTimer(event.gameId, () => game.forceNightResolve(), game.config.nightTimeoutMs);
     } else if (event.type === "day_start") {
+      this.clearTimer(event.gameId);
       this.setTimer(event.gameId, () => game.forceDayEnd(), game.config.dayDurationMs);
     } else if (event.type === "vote_start") {
+      this.clearTimer(event.gameId);
       this.setTimer(event.gameId, () => game.forceVoteResolve(), game.config.voteTimeoutMs);
     } else if (event.type === "game_over") {
+      this.clearTimer(event.gameId);
       this.saveTranscript(event);
       this.stats.recordGame(
         event.data.winners as string[],
