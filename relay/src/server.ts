@@ -570,3 +570,4 @@ const PORT = parseInt(process.env.PORT || "8080");
 const relay = new WerewolfRelay(PORT);
 process.on("SIGINT", () => { relay.close(); process.exit(0); });
 
+// deployed Wed Apr  1 16:15:01 EDT 2026
