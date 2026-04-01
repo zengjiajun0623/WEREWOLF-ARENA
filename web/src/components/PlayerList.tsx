@@ -31,19 +31,13 @@ export function PlayerList({ events }: { events: GameEvent[] }) {
     if (event.type === "night_result") {
       const killed = event.data.killed as string;
       const info = players.get(killed);
-      if (info) {
-        info.alive = false;
-        info.role = event.data.killedRole as string;
-      }
+      if (info) info.alive = false;
     }
 
     if (event.type === "player_eliminated") {
       const elim = event.data.eliminated as string;
       const info = players.get(elim);
-      if (info) {
-        info.alive = false;
-        info.role = event.data.role as string;
-      }
+      if (info) info.alive = false;
     }
 
     if (event.type === "game_over") {

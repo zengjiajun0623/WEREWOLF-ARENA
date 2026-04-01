@@ -15,33 +15,20 @@ export class WerewolfRelay {
   private clients: Map<WebSocket, Client> = new Map();
   private games: Map<string, WerewolfEngine> = new Map();
   private nextGameId: number = 0;
-
-  // Allow reconnection: address -> gameId
   private playerGameMap: Map<string, string> = new Map();
 
-  private wolfChatTimers: Map<string, NodeJS.Timeout> = new Map();
-  private nightTimers: Map<string, NodeJS.Timeout> = new Map();
-  private dayTimers: Map<string, NodeJS.Timeout> = new Map();
-  private voteTimers: Map<string, NodeJS.Timeout> = new Map();
-  private speakerTimers: Map<string, NodeJS.Timeout> = new Map();
-
-  // Heartbeat
+  private timers: Map<string, NodeJS.Timeout> = new Map();
   private heartbeatInterval: NodeJS.Timeout;
 
   constructor(port: number) {
     mkdirSync("transcripts", { recursive: true });
     this.wss = new WebSocketServer({ port });
     this.wss.on("connection", (ws) => this.handleConnection(ws));
-
-    // Ping clients every 30s to detect dead connections
     this.heartbeatInterval = setInterval(() => {
       for (const [ws] of this.clients) {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.ping();
-        }
+        if (ws.readyState === WebSocket.OPEN) ws.ping();
       }
     }, 30_000);
-
     console.log(`Werewolf relay running on ws://localhost:${port}`);
   }
 
@@ -50,12 +37,8 @@ export class WerewolfRelay {
     this.clients.set(ws, client);
 
     ws.on("message", (data) => {
-      try {
-        const msg = JSON.parse(data.toString());
-        this.handleMessage(client, msg);
-      } catch {
-        this.send(ws, { type: "error", data: { message: "invalid message format" } });
-      }
+      try { this.handleMessage(client, JSON.parse(data.toString())); }
+      catch { this.send(ws, { type: "error", data: { message: "invalid format" } }); }
     });
 
     ws.on("close", () => this.handleDisconnect(client));
@@ -64,53 +47,25 @@ export class WerewolfRelay {
 
   private handleDisconnect(client: Client) {
     this.clients.delete(client.ws);
-
     if (!client.address || !client.gameId) return;
 
     const game = this.games.get(client.gameId);
     if (!game) return;
 
-    // If game is in lobby, remove the player
     if (game.phase === Phase.Lobby) {
       game.removePlayer(client.address);
       this.playerGameMap.delete(client.address);
-      console.log(`[${client.address.slice(0, 10)}] Left lobby (${game.players.length}/${game.config.maxPlayers})`);
-
-      // Notify remaining players
-      for (const [, c] of this.clients) {
-        if (c.gameId === client.gameId) {
-          this.send(c.ws, {
-            type: "waiting_for_players",
-            gameId: game.gameId,
-            data: {
-              playerCount: game.players.length,
-              maxPlayers: game.config.maxPlayers,
-              players: game.players.map((p) => p.address),
-            },
-          });
-        }
-      }
-
-      // Clean up empty games
-      if (game.players.length === 0) {
-        this.games.delete(client.gameId);
-      }
+      console.log(`[${client.address.slice(0, 10)}] Left lobby`);
+      this.broadcastToGame(client.gameId, {
+        type: "waiting_for_players",
+        gameId: client.gameId,
+        data: { playerCount: game.players.length, maxPlayers: game.config.maxPlayers, players: game.players.map((p) => p.address) },
+      });
+      if (game.players.length === 0) this.games.delete(client.gameId);
       return;
     }
 
-    // During active game: player is AFK. Timeouts will handle their missing actions.
-    console.log(`[${client.address.slice(0, 10)}] Disconnected during ${game.phase} (round ${game.round}). Timeouts will force their actions.`);
-
-    // Notify spectators
-    for (const [, c] of this.clients) {
-      if (c.gameId === client.gameId && c.isSpectator) {
-        this.send(c.ws, {
-          type: "player_disconnected",
-          gameId: game.gameId,
-          data: { player: client.address, phase: game.phase },
-        } as GameEvent);
-      }
-    }
+    console.log(`[${client.address.slice(0, 10)}] Disconnected during ${game.phase}`);
   }
 
   private handleMessage(client: Client, msg: { type: string; data?: Record<string, unknown> }) {
@@ -118,17 +73,13 @@ export class WerewolfRelay {
       case "register":
         client.address = msg.data?.address as string;
         this.send(client.ws, { type: "registered", data: { address: client.address } });
-
-        // Check for reconnection
+        // Reconnection check
         const existingGameId = this.playerGameMap.get(client.address);
         if (existingGameId) {
           const game = this.games.get(existingGameId);
           if (game && game.phase !== Phase.Finished) {
             client.gameId = existingGameId;
-            this.send(client.ws, {
-              type: "reconnected",
-              data: game.getGameState(),
-            });
+            this.send(client.ws, { type: "reconnected", data: game.getGameState() });
             console.log(`[${client.address.slice(0, 10)}] Reconnected to ${existingGameId}`);
           }
         }
@@ -140,7 +91,7 @@ export class WerewolfRelay {
         this.handleSpectate(client, msg.data?.gameId as string);
         break;
       case "wolf_chat":
-        this.handleWolfChat(client, msg.data?.content as string);
+        this.getClientGame(client)?.submitWolfChat(client.address, msg.data?.content as string);
         break;
       case "night_action":
         this.getClientGame(client)?.submitNightAction(client.address, msg.data?.target as string);
@@ -154,8 +105,6 @@ export class WerewolfRelay {
       case "list_games":
         this.handleListGames(client);
         break;
-      default:
-        this.send(client.ws, { type: "error", data: { message: `unknown type: ${msg.type}` } });
     }
   }
 
@@ -164,21 +113,15 @@ export class WerewolfRelay {
       this.send(client.ws, { type: "error", data: { message: "must register first" } });
       return;
     }
-
-    // Already in a game?
-    if (client.gameId && this.games.has(client.gameId)) {
-      const game = this.games.get(client.gameId)!;
-      if (game.phase !== Phase.Finished) {
-        this.send(client.ws, { type: "error", data: { message: "already in a game" } });
-        return;
-      }
+    if (client.gameId && this.games.has(client.gameId) && this.games.get(client.gameId)!.phase !== Phase.Finished) {
+      this.send(client.ws, { type: "error", data: { message: "already in a game" } });
+      return;
     }
 
     let game: WerewolfEngine | null = null;
     for (const [, g] of this.games) {
       if (g.phase === Phase.Lobby) { game = g; break; }
     }
-
     if (!game) {
       const gameId = `game_${this.nextGameId++}`;
       game = new WerewolfEngine(gameId);
@@ -186,9 +129,8 @@ export class WerewolfRelay {
       game.onEvent((event) => this.handleGameEvent(event));
     }
 
-    const added = game.addPlayer(client.address);
-    if (!added) {
-      this.send(client.ws, { type: "error", data: { message: "could not join game" } });
+    if (!game.addPlayer(client.address)) {
+      this.send(client.ws, { type: "error", data: { message: "could not join" } });
       return;
     }
 
@@ -199,85 +141,42 @@ export class WerewolfRelay {
 
   private handleSpectate(client: Client, gameId: string) {
     const game = this.games.get(gameId);
-    if (!game) {
-      this.send(client.ws, { type: "error", data: { message: "game not found" } });
-      return;
-    }
+    if (!game) { this.send(client.ws, { type: "error", data: { message: "game not found" } }); return; }
     client.gameId = gameId;
     client.isSpectator = true;
     this.send(client.ws, { type: "spectating", data: game.getGameState() });
   }
 
-  private handleWolfChat(client: Client, content: string) {
-    const game = this.getClientGame(client);
-    if (!game) return;
-    game.submitWolfChat(client.address, content);
-  }
-
   private handleListGames(client: Client) {
-    const gameList = [...this.games.entries()].map(([id, game]) => ({
-      gameId: id,
-      phase: game.phase,
-      playerCount: game.players.length,
-      alivePlayers: game.getAlivePlayers().length,
-      round: game.round,
+    const list = [...this.games.entries()].map(([id, g]) => ({
+      gameId: id, phase: g.phase, playerCount: g.players.length,
+      alivePlayers: g.getAlivePlayers().length, round: g.round,
     }));
-    this.send(client.ws, { type: "game_list", data: { games: gameList } });
+    this.send(client.ws, { type: "game_list", data: { games: list } });
   }
 
   private handleGameEvent(event: GameEvent) {
     const game = this.games.get(event.gameId);
     if (!game) return;
 
-    // Phase timeouts
+    // Timers
+    this.clearTimer(event.gameId);
     if (event.type === "wolf_chat_start") {
-      this.clearTimers(event.gameId);
-      this.wolfChatTimers.set(
-        event.gameId,
-        setTimeout(() => game.forceWolfChatEnd(), game.config.wolfChatTimeoutMs)
-      );
+      this.setTimer(event.gameId, () => game.forceWolfChatEnd(), game.config.wolfChatTimeoutMs);
     } else if (event.type === "night_start") {
-      this.clearTimers(event.gameId);
-      this.nightTimers.set(
-        event.gameId,
-        setTimeout(() => game.forceNightResolve(), game.config.nightTimeoutMs)
-      );
+      this.setTimer(event.gameId, () => game.forceNightResolve(), game.config.nightTimeoutMs);
     } else if (event.type === "day_start") {
-      this.clearTimers(event.gameId);
-      this.dayTimers.set(
-        event.gameId,
-        setTimeout(
-          () => game.forceDayEnd(),
-          game.config.dayTimeoutMs * game.config.discussionRounds
-        )
-      );
+      this.setTimer(event.gameId, () => game.forceDayEnd(), game.config.dayDurationMs);
     } else if (event.type === "vote_start") {
-      this.clearTimers(event.gameId);
-      this.voteTimers.set(
-        event.gameId,
-        setTimeout(() => game.forceVoteResolve(), game.config.voteTimeoutMs)
-      );
-    } else if (event.type === "speak_turn") {
-      // Per-speaker timeout: skip after 30s if no response
-      const st = this.speakerTimers.get(event.gameId);
-      if (st) clearTimeout(st);
-      this.speakerTimers.set(
-        event.gameId,
-        setTimeout(() => {
-          console.log(`[${(event.data.speaker as string).slice(0, 10)}] Speaker timeout, skipping`);
-          game.skipCurrentSpeaker();
-        }, 30_000)
-      );
+      this.setTimer(event.gameId, () => game.forceVoteResolve(), game.config.voteTimeoutMs);
     } else if (event.type === "game_over") {
-      this.clearTimers(event.gameId);
       this.saveTranscript(event);
-      // Clean up player-game mappings
       for (const [addr, gid] of this.playerGameMap) {
         if (gid === event.gameId) this.playerGameMap.delete(addr);
       }
     }
 
-    // Route events to clients
+    // Route events
     for (const [, client] of this.clients) {
       if (client.gameId !== event.gameId) continue;
 
@@ -293,28 +192,21 @@ export class WerewolfRelay {
         continue;
       }
 
-      // Private: wolf chat (only wolves + spectators see it)
+      // Private: wolf chat
       if (event.type === "wolf_chat_start" || event.type === "wolf_chat_message" || event.type === "wolf_chat_end") {
         const wolves = event.data.wolves as string[] | undefined;
-        const isWolf = wolves?.includes(client.address);
-        if (isWolf || client.isSpectator) this.send(client.ws, event);
+        if (wolves?.includes(client.address) || client.isSpectator) this.send(client.ws, event);
         continue;
       }
 
-      // Private: speak turn only to the speaker + set timeout
-      if (event.type === "speak_turn") {
-        if (client.address === event.data.speaker) this.send(client.ws, event);
-        continue;
-      }
-
-      // When a day message arrives, clear the speaker timer
-      if (event.type === "day_message") {
-        const st = this.speakerTimers.get(event.gameId);
-        if (st) { clearTimeout(st); this.speakerTimers.delete(event.gameId); }
-      }
-
-      // Public: all players + spectators
+      // Public: everything else goes to all players + spectators
       this.send(client.ws, event);
+    }
+  }
+
+  private broadcastToGame(gameId: string, event: GameEvent) {
+    for (const [, client] of this.clients) {
+      if (client.gameId === gameId) this.send(client.ws, event);
     }
   }
 
@@ -322,33 +214,27 @@ export class WerewolfRelay {
     try {
       const filename = `transcripts/${event.gameId}_${Date.now()}.json`;
       writeFileSync(filename, JSON.stringify({
-        gameId: event.gameId,
-        winner: event.data.winner,
-        roles: event.data.roles,
-        rounds: event.data.rounds,
-        transcript: event.data.transcript,
+        gameId: event.gameId, winner: event.data.winner, roles: event.data.roles,
+        rounds: event.data.rounds, transcript: event.data.transcript,
         savedAt: new Date().toISOString(),
       }, null, 2));
       console.log(`Transcript saved: ${filename}`);
-    } catch (e) {
-      console.error("Failed to save transcript:", e);
-    }
+    } catch (e) { console.error("Failed to save transcript:", e); }
   }
 
   private getClientGame(client: Client): WerewolfEngine | null {
-    if (!client.gameId || !this.games.has(client.gameId)) {
-      this.send(client.ws, { type: "error", data: { message: "not in a game" } });
-      return null;
-    }
+    if (!client.gameId || !this.games.has(client.gameId)) return null;
     return this.games.get(client.gameId)!;
   }
 
-  private clearTimers(gameId: string) {
-    for (const map of [this.wolfChatTimers, this.nightTimers, this.dayTimers, this.voteTimers, this.speakerTimers]) {
-      const t = map.get(gameId);
-      if (t) clearTimeout(t);
-      map.delete(gameId);
-    }
+  private setTimer(gameId: string, fn: () => void, ms: number) {
+    this.timers.set(gameId, setTimeout(fn, ms));
+  }
+
+  private clearTimer(gameId: string) {
+    const t = this.timers.get(gameId);
+    if (t) clearTimeout(t);
+    this.timers.delete(gameId);
   }
 
   private send(ws: WebSocket, data: unknown) {
@@ -357,16 +243,11 @@ export class WerewolfRelay {
 
   close() {
     clearInterval(this.heartbeatInterval);
-    for (const [gameId] of this.games) this.clearTimers(gameId);
+    for (const [id] of this.timers) this.clearTimer(id);
     this.wss.close();
   }
 }
 
 const PORT = parseInt(process.env.PORT || "8080");
 const relay = new WerewolfRelay(PORT);
-
-process.on("SIGINT", () => {
-  console.log("Shutting down...");
-  relay.close();
-  process.exit(0);
-});
+process.on("SIGINT", () => { relay.close(); process.exit(0); });

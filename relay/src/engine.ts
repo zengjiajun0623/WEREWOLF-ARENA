@@ -21,11 +21,9 @@ export class WerewolfEngine {
 
   private nightActions: Map<string, NightAction> = new Map();
   private votes: Map<string, VoteAction> = new Map();
-  private wolfChatMessages: Map<string, string> = new Map(); // sender -> message
+  private wolfChatMessages: Map<string, string> = new Map();
+  private dayMessageCounts: Map<string, number> = new Map(); // messages sent this day
   private eventListeners: ((event: GameEvent) => void)[] = [];
-  private currentSpeakerIndex: number = 0;
-  private discussionRound: number = 0;
-  private speakingOrder: PlayerState[] = [];
 
   constructor(gameId: string, config: Partial<GameConfig> = {}) {
     this.gameId = gameId;
@@ -111,12 +109,10 @@ export class WerewolfEngine {
       const j = Math.floor(Math.random() * (i + 1));
       [indices[i], indices[j]] = [indices[j], indices[i]];
     }
-    // 7 players: 2 werewolves, 1 seer, 1 doctor, 3 villagers
     this.players[indices[0]].role = Role.Werewolf;
     this.players[indices[1]].role = Role.Werewolf;
     this.players[indices[2]].role = Role.Seer;
     this.players[indices[3]].role = Role.Doctor;
-    // indices 4-6 stay Villager
   }
 
   // ── Wolf Chat ───────────────────────────────────────────────────────────────
@@ -126,7 +122,6 @@ export class WerewolfEngine {
     this.wolfChatMessages.clear();
 
     const wolves = this.getWerewolves().filter((p) => p.alive);
-    const alive = this.getAlivePlayers();
 
     this.emit({
       type: "wolf_chat_start",
@@ -134,7 +129,7 @@ export class WerewolfEngine {
       data: {
         round: this.round,
         wolves: wolves.map((w) => w.address),
-        alivePlayers: alive.map((p) => p.address),
+        alivePlayers: this.getAlivePlayers().map((p) => p.address),
       },
     });
   }
@@ -145,10 +140,8 @@ export class WerewolfEngine {
     if (!player || player.role !== Role.Werewolf || !player.alive) return false;
 
     this.wolfChatMessages.set(sender, content.slice(0, this.config.messageMaxLength));
-
     const wolves = this.getWerewolves().filter((p) => p.alive);
 
-    // Broadcast to all wolves
     this.emit({
       type: "wolf_chat_message",
       gameId: this.gameId,
@@ -159,7 +152,6 @@ export class WerewolfEngine {
       },
     });
 
-    // If all alive wolves have spoken, end wolf chat
     if (wolves.every((w) => this.wolfChatMessages.has(w.address))) {
       this.endWolfChat();
     }
@@ -168,6 +160,7 @@ export class WerewolfEngine {
   }
 
   endWolfChat() {
+    if (this.phase !== Phase.WolfChat) return;
     this.emit({
       type: "wolf_chat_end",
       gameId: this.gameId,
@@ -194,23 +187,17 @@ export class WerewolfEngine {
 
   submitNightAction(actor: string, target: string): boolean {
     if (this.phase !== Phase.Night) return false;
-
     const player = this.getPlayer(actor);
     if (!player || !player.alive) return false;
-
     const targetPlayer = this.getPlayer(target);
     if (!targetPlayer || !targetPlayer.alive) return false;
-
-    const validRoles = [Role.Werewolf, Role.Seer, Role.Doctor];
-    if (!validRoles.includes(player.role)) return false;
+    if (![Role.Werewolf, Role.Seer, Role.Doctor].includes(player.role)) return false;
 
     this.nightActions.set(actor, { actor, target });
 
-    // Check if all night actors have submitted
     if (this.allNightActionsIn()) {
       this.resolveNight();
     }
-
     return true;
   }
 
@@ -218,61 +205,46 @@ export class WerewolfEngine {
     const wolves = this.getWerewolves().filter((p) => p.alive);
     const seer = this.getSeer();
     const doctor = this.getDoctor();
-
-    const wolvesReady = wolves.every((w) => this.nightActions.has(w.address));
-    const seerReady = !seer?.alive || this.nightActions.has(seer.address);
-    const doctorReady = !doctor?.alive || this.nightActions.has(doctor.address);
-
-    return wolvesReady && seerReady && doctorReady;
+    return (
+      wolves.every((w) => this.nightActions.has(w.address)) &&
+      (!seer?.alive || this.nightActions.has(seer.address)) &&
+      (!doctor?.alive || this.nightActions.has(doctor.address))
+    );
   }
 
   private resolveNight() {
-    // Resolve kill target (majority wolf vote)
+    // Wolf kill
     const killVotes = new Map<string, number>();
     for (const wolf of this.getWerewolves().filter((p) => p.alive)) {
       const action = this.nightActions.get(wolf.address);
-      if (action) {
-        killVotes.set(action.target, (killVotes.get(action.target) || 0) + 1);
-      }
+      if (action) killVotes.set(action.target, (killVotes.get(action.target) || 0) + 1);
     }
 
     let killTarget: string | null = null;
     let maxVotes = 0;
     for (const [target, votes] of killVotes) {
-      if (votes > maxVotes) {
-        maxVotes = votes;
-        killTarget = target;
-      }
+      if (votes > maxVotes) { maxVotes = votes; killTarget = target; }
     }
 
     // Doctor protection
     const doctor = this.getDoctor();
     const doctorAction = doctor?.alive ? this.nightActions.get(doctor.address) : null;
-    const savedTarget = doctorAction?.target ?? null;
-
-    const wasProtected = killTarget !== null && killTarget === savedTarget;
+    const wasProtected = killTarget !== null && killTarget === doctorAction?.target;
 
     if (wasProtected) {
       this.emit({
         type: "doctor_saved",
         gameId: this.gameId,
-        data: {
-          saved: killTarget,
-          round: this.round,
-        },
+        data: { round: this.round },
       });
     } else if (killTarget) {
       const victim = this.getPlayer(killTarget)!;
       victim.alive = false;
-
+      // HIDDEN ROLES: don't reveal role on night kill
       this.emit({
         type: "night_result",
         gameId: this.gameId,
-        data: {
-          killed: killTarget,
-          killedRole: Role[victim.role],
-          round: this.round,
-        },
+        data: { killed: killTarget, round: this.round },
       });
     }
 
@@ -298,87 +270,38 @@ export class WerewolfEngine {
     this.startDay();
   }
 
-  // ── Day Phase ────────────────────────────────────────────────────────────────
+  // ── Day Phase (free-form) ───────────────────────────────────────────────────
 
   private startDay() {
     this.phase = Phase.Day;
-    this.discussionRound = 0;
-    this.currentSpeakerIndex = 0;
+    this.dayMessageCounts.clear();
 
-    // Shuffle speaking order once per day
-    this.speakingOrder = [...this.getAlivePlayers()];
-    for (let i = this.speakingOrder.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [this.speakingOrder[i], this.speakingOrder[j]] = [
-        this.speakingOrder[j],
-        this.speakingOrder[i],
-      ];
-    }
+    const alive = this.getAlivePlayers();
 
     this.emit({
       type: "day_start",
       gameId: this.gameId,
       data: {
         round: this.round,
-        alivePlayers: this.speakingOrder.map((p) => p.address),
-        discussionRounds: this.config.discussionRounds,
-      },
-    });
-
-    this.requestNextSpeaker();
-  }
-
-  private requestNextSpeaker() {
-    if (this.currentSpeakerIndex >= this.speakingOrder.length) {
-      this.discussionRound++;
-      if (this.discussionRound >= this.config.discussionRounds) {
-        this.startVote();
-        return;
-      }
-      this.currentSpeakerIndex = 0;
-    }
-
-    // Skip dead players (could die mid-discussion via future mechanics)
-    while (
-      this.currentSpeakerIndex < this.speakingOrder.length &&
-      !this.speakingOrder[this.currentSpeakerIndex].alive
-    ) {
-      this.currentSpeakerIndex++;
-    }
-
-    if (this.currentSpeakerIndex >= this.speakingOrder.length) {
-      this.discussionRound++;
-      if (this.discussionRound >= this.config.discussionRounds) {
-        this.startVote();
-        return;
-      }
-      this.currentSpeakerIndex = 0;
-    }
-
-    const speaker = this.speakingOrder[this.currentSpeakerIndex];
-    const dayTranscript = this.transcript.filter(
-      (m) => m.round === this.round && m.phase === Phase.Day
-    );
-
-    this.emit({
-      type: "speak_turn",
-      gameId: this.gameId,
-      data: {
-        speaker: speaker.address,
-        discussionRound: this.discussionRound,
-        transcript: dayTranscript,
-        alivePlayers: this.getAlivePlayers().map((p) => p.address),
+        alivePlayers: alive.map((p) => p.address),
+        durationMs: this.config.dayDurationMs,
+        maxMessages: this.config.maxMessagesPerPlayer,
       },
     });
   }
 
+  // Free-form: any alive player can send a message at any time during day phase
   submitDayMessage(sender: string, content: string): boolean {
     if (this.phase !== Phase.Day) return false;
 
     const player = this.getPlayer(sender);
     if (!player || !player.alive) return false;
 
-    if (this.speakingOrder[this.currentSpeakerIndex]?.address !== sender) return false;
+    // Check message limit
+    const count = this.dayMessageCounts.get(sender) || 0;
+    if (count >= this.config.maxMessagesPerPlayer) return false;
+
+    this.dayMessageCounts.set(sender, count + 1);
 
     const message: GameMessage = {
       gameId: this.gameId,
@@ -394,13 +317,28 @@ export class WerewolfEngine {
     this.emit({
       type: "day_message",
       gameId: this.gameId,
-      data: { message },
+      data: {
+        message,
+        remainingMessages: this.config.maxMessagesPerPlayer - count - 1,
+      },
     });
 
-    this.currentSpeakerIndex++;
-    this.requestNextSpeaker();
+    // If all alive players have used all their messages, end day early
+    const alive = this.getAlivePlayers();
+    const allDone = alive.every(
+      (p) => (this.dayMessageCounts.get(p.address) || 0) >= this.config.maxMessagesPerPlayer
+    );
+    if (allDone) {
+      this.startVote();
+    }
 
     return true;
+  }
+
+  // Called by server when day timer expires
+  forceDayEnd() {
+    if (this.phase !== Phase.Day) return;
+    this.startVote();
   }
 
   // ── Vote Phase ───────────────────────────────────────────────────────────────
@@ -422,10 +360,8 @@ export class WerewolfEngine {
 
   submitVote(voter: string, target: string): boolean {
     if (this.phase !== Phase.Vote) return false;
-
     const player = this.getPlayer(voter);
     if (!player || !player.alive) return false;
-
     const targetPlayer = this.getPlayer(target);
     if (!targetPlayer || !targetPlayer.alive) return false;
     if (voter === target) return false;
@@ -435,7 +371,6 @@ export class WerewolfEngine {
     if (this.votes.size === this.getAlivePlayers().length) {
       this.resolveVote();
     }
-
     return true;
   }
 
@@ -451,13 +386,9 @@ export class WerewolfEngine {
     let eliminated: string | null = null;
     let maxVotes = 0;
     for (const [target, count] of voteCounts) {
-      if (count > maxVotes) {
-        maxVotes = count;
-        eliminated = target;
-      }
+      if (count > maxVotes) { maxVotes = count; eliminated = target; }
     }
 
-    // Tie = no elimination
     const tiedPlayers = [...voteCounts.entries()].filter(([, c]) => c === maxVotes);
     if (tiedPlayers.length > 1) eliminated = null;
 
@@ -475,10 +406,11 @@ export class WerewolfEngine {
     if (eliminated) {
       const victim = this.getPlayer(eliminated)!;
       victim.alive = false;
+      // HIDDEN ROLES: don't reveal role on vote elimination
       this.emit({
         type: "player_eliminated",
         gameId: this.gameId,
-        data: { eliminated, role: Role[victim.role], round: this.round },
+        data: { eliminated, round: this.round },
       });
     }
 
@@ -509,6 +441,7 @@ export class WerewolfEngine {
       .filter((p) => winner === Side.Villagers ? p.role === Role.Werewolf : p.role !== Role.Werewolf)
       .map((p) => p.address);
 
+    // ALL roles revealed only at game end
     this.emit({
       type: "game_over",
       gameId: this.gameId,
@@ -558,18 +491,6 @@ export class WerewolfEngine {
     }
 
     this.resolveNight();
-  }
-
-  forceDayEnd() {
-    if (this.phase !== Phase.Day) return;
-    this.startVote();
-  }
-
-  skipCurrentSpeaker() {
-    if (this.phase !== Phase.Day) return;
-    // Skip the current speaker (AFK/disconnected) and move to next
-    this.currentSpeakerIndex++;
-    this.requestNextSpeaker();
   }
 
   forceVoteResolve() {

@@ -46,7 +46,6 @@ export interface GameEvent {
     | "night_result"
     | "day_start"
     | "day_message"
-    | "speak_turn"
     | "vote_start"
     | "vote_result"
     | "player_eliminated"
@@ -72,9 +71,9 @@ export interface PlayerState {
 
 export interface GameConfig {
   maxPlayers: number;
-  discussionRounds: number;
+  dayDurationMs: number;        // total time for free-form discussion
+  maxMessagesPerPlayer: number;  // max messages per player per day
   nightTimeoutMs: number;
-  dayTimeoutMs: number;
   voteTimeoutMs: number;
   wolfChatTimeoutMs: number;
   messageMaxLength: number;
@@ -82,9 +81,9 @@ export interface GameConfig {
 
 export const DEFAULT_CONFIG: GameConfig = {
   maxPlayers: 7,
-  discussionRounds: 3,
+  dayDurationMs: 90_000,        // 90 seconds of free-form discussion
+  maxMessagesPerPlayer: 3,       // each player can send up to 3 messages per day
   nightTimeoutMs: 60_000,
-  dayTimeoutMs: 60_000,
   voteTimeoutMs: 30_000,
   wolfChatTimeoutMs: 30_000,
   messageMaxLength: 800,

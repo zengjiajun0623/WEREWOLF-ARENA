@@ -1,6 +1,6 @@
 // Thin WebSocket protocol client. No AI dependency.
 // Connects to relay, handles game events, delegates decisions to a Brain.
-// Reconnects automatically on disconnect.
+// Supports free-form discussion and auto-reconnect.
 
 import WebSocket from "ws";
 import type { Brain, GameContext, Message } from "./brain.js";
@@ -14,7 +14,6 @@ export class WerewolfClient {
   private relayUrl: string;
   private shouldReconnect = true;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 10;
 
   // Game state
   private role = "unknown";
@@ -25,7 +24,13 @@ export class WerewolfClient {
   private round = 0;
   private allPlayers: string[] = [];
   private transcript: Message[] = [];
-  private eliminatedPlayers: { address: string; role: string; round: number; method: string }[] = [];
+  private dayTranscript: Message[] = []; // current day only
+  private eliminatedPlayers: { address: string; round: number; method: string }[] = [];
+
+  // Free-form discussion state
+  private dayMessagesRemaining = 0;
+  private dayActive = false;
+  private dayTimer: NodeJS.Timeout | null = null;
 
   constructor(relayUrl: string, address: string, brain: Brain) {
     this.address = address;
@@ -40,30 +45,22 @@ export class WerewolfClient {
     this.ws.on("open", () => {
       this.reconnectAttempts = 0;
       this.send({ type: "register", data: { address: this.address } });
-      // If not reconnecting to an existing game, join a new one
       if (!this.gameId) {
         setTimeout(() => this.send({ type: "join_game" }), 500);
       }
     });
 
     this.ws.on("message", (data) => {
-      try {
-        this.handleEvent(JSON.parse(data.toString()));
-      } catch (e) {
-        console.error("Parse error:", e);
-      }
+      try { this.handleEvent(JSON.parse(data.toString())); }
+      catch (e) { console.error("Parse error:", e); }
     });
 
-    this.ws.on("error", (err) => {
-      console.error("WebSocket error:", err.message);
-    });
+    this.ws.on("error", (err) => console.error("WS error:", err.message));
 
     this.ws.on("close", () => {
       console.log(`[${short(this.address)}] Disconnected`);
-      if (this.shouldReconnect && this.reconnectAttempts < this.maxReconnectAttempts) {
-        const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
-        this.reconnectAttempts++;
-        console.log(`[${short(this.address)}] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})...`);
+      if (this.shouldReconnect && this.reconnectAttempts < 10) {
+        const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts++), 30000);
         setTimeout(() => this.connect(), delay);
       }
     });
@@ -89,7 +86,7 @@ export class WerewolfClient {
 
       case "reconnected":
         this.gameId = event.data.gameId as string;
-        console.log(`[${short(this.address)}] Reconnected to ${this.gameId} (${event.data.phase}, round ${event.data.round})`);
+        console.log(`[${short(this.address)}] Reconnected to ${this.gameId}`);
         break;
 
       case "joined":
@@ -144,14 +141,12 @@ export class WerewolfClient {
           const target = await this.brain.wolfKill(ctx, targets);
           this.send({ type: "night_action", data: { target } });
           console.log(`[${short(this.address)}] (wolf) → ${short(target)}`);
-
         } else if (this.role === "Seer") {
           const uninspected = alive.filter((a) => a !== this.address && !this.knownRoles.has(a));
           const pool = uninspected.length > 0 ? uninspected : alive.filter((a) => a !== this.address);
           const target = await this.brain.seerInspect(ctx, pool);
           this.send({ type: "night_action", data: { target } });
           console.log(`[${short(this.address)}] (seer) → ${short(target)}`);
-
         } else if (this.role === "Doctor") {
           const candidates = alive.filter((a) => a !== this.lastProtectedTarget);
           const target = await this.brain.doctorProtect(ctx, candidates);
@@ -167,47 +162,59 @@ export class WerewolfClient {
         console.log(`[${short(this.address)}] SEER: ${short(event.data.target as string)} is ${event.data.isWerewolf ? "WEREWOLF!" : "safe"}`);
         break;
 
-      case "night_result": {
-        const killed = event.data.killed as string;
-        this.eliminatedPlayers.push({ address: killed, role: event.data.killedRole as string, round: this.round, method: "killed" });
-        console.log(`\n${short(killed)} killed (${event.data.killedRole})\n`);
+      case "night_result":
+        console.log(`\n${short(event.data.killed as string)} was killed in the night.\n`);
+        this.eliminatedPlayers.push({ address: event.data.killed as string, round: this.round, method: "killed" });
         break;
-      }
 
       case "doctor_saved":
-        console.log(`\nDoctor saved someone. No one died.\n`);
+        console.log(`\nNo one died last night.\n`);
         break;
 
-      // ── Day ────────────────────────────────────────────────────────────────
-      case "day_start":
-        console.log(`\n--- Day ${event.data.round} --- (${(event.data.alivePlayers as string[]).length} alive)`);
-        break;
-
-      case "speak_turn": {
-        const dayTranscript = (event.data.transcript as Message[]) || [];
+      // ── Day (free-form) ────────────────────────────────────────────────────
+      case "day_start": {
         const alive = event.data.alivePlayers as string[];
-        const ctx = { ...this.ctx(), alivePlayers: alive };
-        const msg = await this.brain.speak(ctx, dayTranscript);
-        this.send({ type: "day_message", data: { content: msg } });
+        const maxMessages = event.data.maxMessages as number;
+        const durationMs = event.data.durationMs as number;
+        this.dayTranscript = [];
+        this.dayMessagesRemaining = maxMessages;
+        this.dayActive = true;
+
+        console.log(`\n--- Day ${event.data.round} --- (${alive.length} alive, ${maxMessages} messages each, ${durationMs / 1000}s)`);
+
+        // Stagger first message: random delay 1-5s so agents don't all speak at once
+        const initialDelay = 1000 + Math.random() * 4000;
+        setTimeout(() => this.maybeSendDayMessage(alive), initialDelay);
         break;
       }
 
       case "day_message": {
         const msg = event.data.message as Message;
         this.transcript.push(msg);
+        this.dayTranscript.push(msg);
+
         if (msg.sender !== this.address) {
           console.log(`[${short(msg.sender)}]: ${msg.content}`);
+
+          // React to other messages — send a follow-up after a short delay
+          if (this.dayActive && this.dayMessagesRemaining > 0) {
+            const reactDelay = 2000 + Math.random() * 5000;
+            const alive = this.getAliveFromTranscript();
+            setTimeout(() => this.maybeSendDayMessage(alive), reactDelay);
+          }
         }
         break;
       }
 
       // ── Vote ───────────────────────────────────────────────────────────────
       case "vote_start": {
-        const dayTranscript = (event.data.transcript as Message[]) || [];
+        this.dayActive = false;
+        if (this.dayTimer) { clearTimeout(this.dayTimer); this.dayTimer = null; }
+
         const alive = event.data.alivePlayers as string[];
         const candidates = alive.filter((a) => a !== this.address);
         const ctx = { ...this.ctx(), alivePlayers: alive };
-        const target = await this.brain.vote(ctx, dayTranscript, candidates);
+        const target = await this.brain.vote(ctx, this.dayTranscript, candidates);
         this.send({ type: "vote", data: { target } });
         console.log(`[${short(this.address)}] Voted → ${short(target)}`);
         break;
@@ -217,19 +224,14 @@ export class WerewolfClient {
         console.log(`\nVote: ${event.data.eliminated ? short(event.data.eliminated as string) + " eliminated" : "tie"}`);
         break;
 
-      case "player_eliminated": {
-        const elim = event.data.eliminated as string;
-        this.eliminatedPlayers.push({ address: elim, role: event.data.role as string, round: event.data.round as number, method: "voted" });
-        console.log(`${short(elim)} was ${event.data.role}`);
-        break;
-      }
-
-      case "player_disconnected":
-        console.log(`[${short(event.data.player as string)}] disconnected`);
+      case "player_eliminated":
+        console.log(`${short(event.data.eliminated as string)} was eliminated.`);
+        this.eliminatedPlayers.push({ address: event.data.eliminated as string, round: event.data.round as number, method: "voted" });
         break;
 
       // ── Game Over ──────────────────────────────────────────────────────────
       case "game_over": {
+        this.dayActive = false;
         const winner = event.data.winner as string;
         const roles = event.data.roles as Record<string, string>;
         const myActualRole = roles[this.address] || this.role;
@@ -237,6 +239,7 @@ export class WerewolfClient {
         const didWin = (winner === "werewolves" && isWolf) || (winner === "villagers" && !isWolf);
 
         console.log(`\n=== ${winner.toUpperCase()} WIN — ${didWin ? "YOU WON" : "YOU LOST"} ===`);
+        console.log(`Roles revealed:`);
         for (const [addr, role] of Object.entries(roles)) {
           console.log(`  ${short(addr)}: ${role}`);
         }
@@ -253,6 +256,24 @@ export class WerewolfClient {
         console.error(`[${short(this.address)}] Error: ${event.data.message}`);
         break;
     }
+  }
+
+  private async maybeSendDayMessage(alive: string[]) {
+    if (!this.dayActive || this.dayMessagesRemaining <= 0) return;
+
+    const ctx = { ...this.ctx(), alivePlayers: alive };
+    const msg = await this.brain.speak(ctx, this.dayTranscript);
+
+    if (this.dayActive && this.dayMessagesRemaining > 0) {
+      this.dayMessagesRemaining--;
+      this.send({ type: "day_message", data: { content: msg } });
+    }
+  }
+
+  private getAliveFromTranscript(): string[] {
+    // Best effort: use allPlayers minus eliminated
+    const eliminated = new Set(this.eliminatedPlayers.map((e) => e.address));
+    return this.allPlayers.filter((a) => !eliminated.has(a));
   }
 
   private send(msg: Record<string, unknown>) {

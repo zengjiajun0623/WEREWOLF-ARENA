@@ -51,10 +51,9 @@ function EventLine({ event }: { event: GameEvent }) {
 
     case "night_result": {
       const killed = event.data.killed as string;
-      const role = event.data.killedRole as string;
       return (
         <div className="text-red-300 py-1">
-          {short(killed)} was killed in the night. They were a <RoleTag role={role} />.
+          {short(killed)} was killed in the night.
         </div>
       );
     }
@@ -100,7 +99,7 @@ function EventLine({ event }: { event: GameEvent }) {
     case "player_eliminated":
       return (
         <div className="text-gray-300">
-          {short(event.data.eliminated as string)} was a <RoleTag role={event.data.role as string} />.
+          {short(event.data.eliminated as string)} was eliminated.
         </div>
       );
 
