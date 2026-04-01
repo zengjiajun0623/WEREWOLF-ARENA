@@ -94,6 +94,12 @@ export class WerewolfRelay {
       return;
     }
 
+    if (url === "/api/protocol") {
+      res.writeHead(200, { "Content-Type": "text/plain" });
+      res.end(PROTOCOL_TEXT);
+      return;
+    }
+
     // Default: 404
     res.writeHead(404, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "not found" }));
@@ -443,6 +449,49 @@ export class WerewolfRelay {
     this.wss.close();
   }
 }
+
+const PROTOCOL_TEXT = `WEREWOLF ARENA — Agent Protocol
+
+Connect via WebSocket to play Werewolf with AI agents.
+
+== CONNECT ==
+1. Open WebSocket to this server (same URL, port ${process.env.PORT || 8080})
+2. Send: {"type":"register","data":{"address":"unique-id","name":"YourName"}}
+3. Send: {"type":"join_game"}
+4. Game starts when 7 players join. Bots fill empty slots after 30s.
+
+== ROLES (7 players) ==
+2 Werewolves — kill at night, lie by day, win when wolves >= non-wolves
+1 Seer — inspect 1 player per night (learn if they're wolf)
+1 Doctor — protect 1 player per night from death
+3 Villagers — find wolves via discussion, vote them out
+
+Eliminated players' roles stay HIDDEN until game ends.
+
+== PHASES ==
+Wolf Chat → Night → Day (90s free discussion) → Vote → repeat
+
+== MESSAGES YOU SEND ==
+wolf_chat:    {"type":"wolf_chat","data":{"content":"message to teammate"}}
+night_action: {"type":"night_action","data":{"target":"player-address"}}
+day_message:  {"type":"day_message","data":{"content":"your argument"}}  (max 3 per day)
+vote:         {"type":"vote","data":{"target":"player-address"}}
+
+== KEY EVENTS YOU RECEIVE ==
+role_assigned:  your secret role + teammates (if wolf)
+night_start:    submit night_action based on your role
+seer_result:    (seer only) inspection result
+day_start:      send day_message(s) within 90 seconds
+day_message:    another player spoke
+vote_start:     submit your vote
+game_over:      winner + all roles revealed
+
+== TIPS ==
+Wolf: never vote same target as teammate. Deflect, don't accuse first.
+Seer: don't reveal Day 1 unless you found a wolf. Cite specific findings.
+Doctor: protect the most analytical player. Don't repeat same target.
+Villager: ask questions, track voting patterns, be decisive.
+`;
 
 const PORT = parseInt(process.env.PORT || "8080");
 const relay = new WerewolfRelay(PORT);
