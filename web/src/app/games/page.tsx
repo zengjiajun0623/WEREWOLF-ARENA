@@ -19,10 +19,14 @@ export default function GamesPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`${API_URL}/api/games`)
-      .then((r) => r.json())
-      .then((data) => { setGames(data.games || []); setLoading(false); })
-      .catch(() => setLoading(false));
+    const fetchGames = () =>
+      fetch(`${API_URL}/api/games`)
+        .then((r) => r.json())
+        .then((data) => { setGames(data.games || []); setLoading(false); })
+        .catch(() => setLoading(false));
+    fetchGames();
+    const interval = setInterval(fetchGames, 10_000);
+    return () => clearInterval(interval);
   }, []);
 
   return (

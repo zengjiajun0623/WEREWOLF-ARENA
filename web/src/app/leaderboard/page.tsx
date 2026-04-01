@@ -20,10 +20,14 @@ export default function LeaderboardPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`${API_URL}/api/stats`)
-      .then((r) => r.json())
-      .then((data) => { setPlayers(data.leaderboard || []); setLoading(false); })
-      .catch(() => setLoading(false));
+    const fetchStats = () =>
+      fetch(`${API_URL}/api/stats`)
+        .then((r) => r.json())
+        .then((data) => { setPlayers(data.leaderboard || []); setLoading(false); })
+        .catch(() => setLoading(false));
+    fetchStats();
+    const interval = setInterval(fetchStats, 10_000);
+    return () => clearInterval(interval);
   }, []);
 
   return (
