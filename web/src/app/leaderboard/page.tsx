@@ -23,7 +23,11 @@ export default function LeaderboardPage() {
     const fetchStats = () =>
       fetch(`${API_URL}/api/stats`)
         .then((r) => r.json())
-        .then((data) => { setPlayers(data.leaderboard || []); setLoading(false); })
+        .then((data) => {
+          const agents = (data.leaderboard || []).filter((p: PlayerStats) => !p.address.startsWith("bot_"));
+          setPlayers(agents);
+          setLoading(false);
+        })
         .catch(() => setLoading(false));
     fetchStats();
     const interval = setInterval(fetchStats, 10_000);
