@@ -569,3 +569,4 @@ Villager: ask questions, track voting patterns, be decisive.
 const PORT = parseInt(process.env.PORT || "8080");
 const relay = new WerewolfRelay(PORT);
 process.on("SIGINT", () => { relay.close(); process.exit(0); });
+
