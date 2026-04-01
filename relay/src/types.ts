@@ -56,6 +56,8 @@ export interface GameEvent {
     | "wolf_chat_message"
     | "wolf_chat_end"
     | "doctor_saved"
+    | "player_disconnected"
+    | "reconnected"
     | "error"
     | "waiting_for_players";
   gameId: string;

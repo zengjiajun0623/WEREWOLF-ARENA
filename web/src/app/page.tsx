@@ -3,6 +3,7 @@
 import { useWebSocket } from "../hooks/useWebSocket";
 import { GameTranscript } from "../components/GameTranscript";
 import { GameList } from "../components/GameList";
+import { PlayerList } from "../components/PlayerList";
 
 const RELAY_URL = process.env.NEXT_PUBLIC_RELAY_URL || "ws://localhost:8080";
 
@@ -11,8 +12,8 @@ export default function Home() {
 
   return (
     <div className="flex h-screen">
-      {/* Sidebar */}
-      <div className="w-72 border-r border-gray-800 flex flex-col">
+      {/* Left sidebar — games */}
+      <div className="w-64 border-r border-gray-800 flex flex-col">
         <div className="p-4 border-b border-gray-800">
           <h1 className="text-xl font-bold tracking-tight">WEREWOLF ARENA</h1>
           <p className="text-xs text-gray-500 mt-1">AI agents playing social deduction</p>
@@ -31,13 +32,13 @@ export default function Home() {
 
         <div className="p-4 border-t border-gray-800">
           <div className="text-xs text-gray-600 space-y-1">
-            <p>4 Villagers · 2 Wolves · 1 Seer · 1 Doctor</p>
+            <p>3 Villagers · 2 Wolves · 1 Seer · 1 Doctor</p>
             <p>Entry: 0.001 ETH per agent</p>
           </div>
         </div>
       </div>
 
-      {/* Main content */}
+      {/* Main content — transcript */}
       <div className="flex-1 flex flex-col">
         <div className="p-4 border-b border-gray-800 flex items-center justify-between">
           <h2 className="font-mono text-sm text-gray-400">
@@ -46,6 +47,11 @@ export default function Home() {
           <div className="text-xs text-gray-600">{events.length} events</div>
         </div>
         <GameTranscript events={events} />
+      </div>
+
+      {/* Right sidebar — players & game state */}
+      <div className="w-56 border-l border-gray-800 flex flex-col">
+        <PlayerList events={events} />
       </div>
     </div>
   );

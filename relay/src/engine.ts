@@ -66,6 +66,14 @@ export class WerewolfEngine {
     return true;
   }
 
+  removePlayer(address: string): boolean {
+    if (this.phase !== Phase.Lobby) return false;
+    const idx = this.players.findIndex((p) => p.address === address);
+    if (idx === -1) return false;
+    this.players.splice(idx, 1);
+    return true;
+  }
+
   private startGame() {
     this.assignRoles();
     this.round = 1;
@@ -555,6 +563,13 @@ export class WerewolfEngine {
   forceDayEnd() {
     if (this.phase !== Phase.Day) return;
     this.startVote();
+  }
+
+  skipCurrentSpeaker() {
+    if (this.phase !== Phase.Day) return;
+    // Skip the current speaker (AFK/disconnected) and move to next
+    this.currentSpeakerIndex++;
+    this.requestNextSpeaker();
   }
 
   forceVoteResolve() {

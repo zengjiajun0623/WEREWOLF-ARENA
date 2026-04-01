@@ -1,5 +1,6 @@
 // Thin WebSocket protocol client. No AI dependency.
 // Connects to relay, handles game events, delegates decisions to a Brain.
+// Reconnects automatically on disconnect.
 
 import WebSocket from "ws";
 import type { Brain, GameContext, Message } from "./brain.js";
@@ -7,9 +8,13 @@ import type { Brain, GameContext, Message } from "./brain.js";
 function short(addr: string): string { return addr?.slice(0, 10) || "???"; }
 
 export class WerewolfClient {
-  private ws: WebSocket;
+  private ws: WebSocket | null = null;
   private brain: Brain;
   private address: string;
+  private relayUrl: string;
+  private shouldReconnect = true;
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 10;
 
   // Game state
   private role = "unknown";
@@ -25,11 +30,20 @@ export class WerewolfClient {
   constructor(relayUrl: string, address: string, brain: Brain) {
     this.address = address;
     this.brain = brain;
-    this.ws = new WebSocket(relayUrl);
+    this.relayUrl = relayUrl;
+    this.connect();
+  }
+
+  private connect() {
+    this.ws = new WebSocket(this.relayUrl);
 
     this.ws.on("open", () => {
-      this.send({ type: "register", data: { address } });
-      setTimeout(() => this.send({ type: "join_game" }), 500);
+      this.reconnectAttempts = 0;
+      this.send({ type: "register", data: { address: this.address } });
+      // If not reconnecting to an existing game, join a new one
+      if (!this.gameId) {
+        setTimeout(() => this.send({ type: "join_game" }), 500);
+      }
     });
 
     this.ws.on("message", (data) => {
@@ -40,15 +54,26 @@ export class WerewolfClient {
       }
     });
 
-    this.ws.on("error", (err) => console.error("WebSocket error:", err.message));
-    this.ws.on("close", () => console.log(`[${short(address)}] Disconnected`));
+    this.ws.on("error", (err) => {
+      console.error("WebSocket error:", err.message);
+    });
+
+    this.ws.on("close", () => {
+      console.log(`[${short(this.address)}] Disconnected`);
+      if (this.shouldReconnect && this.reconnectAttempts < this.maxReconnectAttempts) {
+        const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
+        this.reconnectAttempts++;
+        console.log(`[${short(this.address)}] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})...`);
+        setTimeout(() => this.connect(), delay);
+      }
+    });
   }
 
   private ctx(): GameContext {
     return {
       myAddress: this.address,
       myRole: this.role,
-      alivePlayers: [], // filled per-event
+      alivePlayers: [],
       round: this.round,
       teammates: this.teammates,
       knownRoles: this.knownRoles,
@@ -60,6 +85,11 @@ export class WerewolfClient {
     switch (event.type) {
       case "registered":
         console.log(`[${short(this.address)}] Registered`);
+        break;
+
+      case "reconnected":
+        this.gameId = event.data.gameId as string;
+        console.log(`[${short(this.address)}] Reconnected to ${this.gameId} (${event.data.phase}, round ${event.data.round})`);
         break;
 
       case "joined":
@@ -194,6 +224,10 @@ export class WerewolfClient {
         break;
       }
 
+      case "player_disconnected":
+        console.log(`[${short(event.data.player as string)}] disconnected`);
+        break;
+
       // ── Game Over ──────────────────────────────────────────────────────────
       case "game_over": {
         const winner = event.data.winner as string;
@@ -210,6 +244,7 @@ export class WerewolfClient {
         const ctx = { ...this.ctx(), alivePlayers: [] };
         await this.brain.onGameOver(ctx, winner, roles, didWin);
 
+        this.shouldReconnect = false;
         setTimeout(() => process.exit(0), 2000);
         break;
       }
@@ -221,7 +256,7 @@ export class WerewolfClient {
   }
 
   private send(msg: Record<string, unknown>) {
-    if (this.ws.readyState === WebSocket.OPEN) {
+    if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(msg));
     }
   }
