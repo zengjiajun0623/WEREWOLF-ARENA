@@ -4,7 +4,7 @@ import { writeFileSync, mkdirSync } from "fs";
 import { WerewolfEngine } from "./engine.js";
 import { StatsTracker } from "./stats.js";
 import { BotBrain, nextBotName } from "./bot.js";
-import { Role, Phase, type GameEvent } from "./types.js";
+import { Role, Phase, type GameEvent, type GameMessage } from "./types.js";
 
 interface Client {
   ws: WebSocket;
@@ -326,7 +326,46 @@ export class WerewolfRelay {
   }
 
   private handleBotActions(event: GameEvent, game: WerewolfEngine) {
-    const botPlayers = game.players.filter((p) => p.isBot && p.alive);
+    // Feed game state to ALL bots (alive or dead) for tracking
+    const allBots = game.players.filter((p) => p.isBot);
+    const botPlayers = allBots.filter((p) => p.alive);
+
+    // Update all bots with game events for state tracking
+    if (event.type === "night_result") {
+      const killed = event.data.killed as string | null;
+      if (killed) {
+        for (const p of allBots) {
+          this.bots.get(p.address)?.recordDeath(killed);
+        }
+      }
+    }
+
+    if (event.type === "player_eliminated") {
+      const eliminated = event.data.eliminated as string;
+      for (const p of allBots) {
+        this.bots.get(p.address)?.recordDeath(eliminated);
+      }
+    }
+
+    if (event.type === "day_message") {
+      const msg = event.data.message as GameMessage;
+      const alive = game.getAlivePlayers().map((p) => p.address);
+      // Map addresses to names for better matching
+      const names = game.players.map((p) => p.name);
+      for (const p of allBots) {
+        this.bots.get(p.address)?.recordDayMessage(msg.sender, msg.content, names);
+      }
+    }
+
+    if (event.type === "vote_result") {
+      const votes = event.data.votes as Record<string, string>;
+      for (const [voter, target] of Object.entries(votes)) {
+        for (const p of allBots) {
+          this.bots.get(p.address)?.recordVote(voter, target);
+        }
+      }
+    }
+
     if (botPlayers.length === 0) return;
 
     if (event.type === "role_assigned") {
@@ -349,6 +388,7 @@ export class WerewolfRelay {
       for (const p of botPlayers) {
         const bot = this.bots.get(p.address);
         if (bot && p.role === Role.Werewolf) {
+          bot.setRound(event.data.round as number);
           const alive = (event.data.alivePlayers as string[]).filter((a) => a !== p.address);
           const targets = alive.filter((a) => !game.getWerewolves().some((w) => w.address === a));
           setTimeout(() => game.submitWolfChat(p.address, bot.wolfChat(targets)), 500 + Math.random() * 2000);
@@ -362,6 +402,7 @@ export class WerewolfRelay {
       for (const p of botPlayers) {
         const bot = this.bots.get(p.address);
         if (!bot) continue;
+        bot.setRound(event.data.round as number);
         let target: string;
         if (p.role === Role.Werewolf) {
           const targets = alive.filter((a) => a !== p.address && !game.getWerewolves().some((w) => w.address === a));
@@ -383,7 +424,7 @@ export class WerewolfRelay {
         const bot = this.bots.get(p.address);
         if (!bot) continue;
         bot.resetDay();
-        // Bots send messages with staggered delays
+        bot.setRound(event.data.round as number);
         const alive = (event.data.alivePlayers as string[]);
         const maxMsg = event.data.maxMessages as number;
         for (let m = 0; m < maxMsg; m++) {
