@@ -1,6 +1,6 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { createServer, type IncomingMessage, type ServerResponse } from "http";
-import { writeFileSync, mkdirSync } from "fs";
+import { writeFileSync, mkdirSync, readdirSync } from "fs";
 import { WerewolfEngine } from "./engine.js";
 import { StatsTracker } from "./stats.js";
 import { BotBrain, nextBotName } from "./bot.js";
@@ -31,6 +31,19 @@ export class WerewolfRelay {
   constructor(port: number) {
     mkdirSync("transcripts", { recursive: true });
     this.stats = new StatsTracker();
+
+    // Initialize nextGameId from existing transcripts to avoid duplicates after restart
+    try {
+      const files = readdirSync("transcripts").filter((f) => f.endsWith(".json"));
+      for (const f of files) {
+        const match = f.match(/^game_(\d+)_/);
+        if (match) {
+          const id = parseInt(match[1], 10) + 1;
+          if (id > this.nextGameId) this.nextGameId = id;
+        }
+      }
+      if (this.nextGameId > 0) console.log(`Resuming game IDs from game_${this.nextGameId}`);
+    } catch { /* fresh start */ }
 
     // HTTP server for REST API + WebSocket upgrade
     const httpServer = createServer((req, res) => this.handleHttp(req, res));
@@ -469,9 +482,14 @@ export class WerewolfRelay {
 
   private saveTranscript(event: GameEvent) {
     try {
+      const game = this.games.get(event.gameId);
+      const playerNames = game
+        ? Object.fromEntries(game.players.map((p) => [p.address, p.name]))
+        : {};
       const filename = `transcripts/${event.gameId}_${Date.now()}.json`;
       writeFileSync(filename, JSON.stringify({
         gameId: event.gameId, winner: event.data.winner, roles: event.data.roles,
+        playerNames,
         rounds: event.data.rounds, transcript: event.data.transcript,
         savedAt: new Date().toISOString(),
       }, null, 2));

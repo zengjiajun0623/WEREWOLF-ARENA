@@ -5,14 +5,13 @@ import { useState, useEffect, use } from "react";
 import { GameTranscript } from "../../../components/GameTranscript";
 import type { GameEvent } from "../../../hooks/useWebSocket";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
-
-function short(addr: string) { return addr?.slice(0, 10) || "???"; }
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://abundant-radiance-production.up.railway.app";
 
 interface TranscriptData {
   gameId: string;
   winner: string;
   roles: Record<string, string>;
+  playerNames?: Record<string, string>;
   rounds: number;
   transcript: { sender: string; content: string; round: number; phase: string }[];
   savedAt: string;
@@ -40,6 +39,10 @@ export default function GameReplayPage({ params }: { params: Promise<{ id: strin
   if (loading) return <div className="min-h-screen flex items-center justify-center text-gray-500">Loading...</div>;
   if (!data) return <div className="min-h-screen flex items-center justify-center text-gray-500">Game not found</div>;
 
+  const playerNames = data.playerNames || {};
+  const allPlayers = Object.keys(data.roles);
+  const name = (addr: string) => playerNames[addr] || addr?.slice(0, 10) || "???";
+
   // Convert transcript to GameEvent format for the GameTranscript component
   const events: GameEvent[] = [];
 
@@ -47,25 +50,31 @@ export default function GameReplayPage({ params }: { params: Promise<{ id: strin
   events.push({
     type: "game_start",
     gameId: data.gameId,
-    data: { players: Object.keys(data.roles) },
+    data: { players: allPlayers },
   });
 
   // Transcript messages as day_message events
   let lastRound = 0;
   let lastPhase = "";
+  // Track alive players: start with all, remove one per round (killed at night)
+  let aliveCount = allPlayers.length;
 
   for (const msg of data.transcript) {
     if (msg.round !== lastRound) {
       lastRound = msg.round;
       lastPhase = "";
+      // Each new round means a night kill happened (one fewer alive)
+      if (lastRound > 1) aliveCount--;
     }
 
     if (msg.phase !== lastPhase) {
       if (msg.phase === "day") {
+        // After night kill, one fewer player alive
+        const dayAlive = lastRound === 1 ? allPlayers.length - 1 : aliveCount;
         events.push({
           type: "day_start",
           gameId: data.gameId,
-          data: { round: msg.round, alivePlayers: [] },
+          data: { round: msg.round, alivePlayers: allPlayers.slice(0, dayAlive) },
         });
       }
       lastPhase = msg.phase;
@@ -110,7 +119,7 @@ export default function GameReplayPage({ params }: { params: Promise<{ id: strin
               {data.savedAt && <span>{new Date(data.savedAt).toLocaleString()}</span>}
             </div>
           </div>
-          <GameTranscript events={events} />
+          <GameTranscript events={events} playerNames={playerNames} />
         </div>
 
         {/* Roles sidebar */}
@@ -119,7 +128,7 @@ export default function GameReplayPage({ params }: { params: Promise<{ id: strin
           <div className="space-y-2">
             {Object.entries(data.roles).map(([addr, role]) => (
               <div key={addr} className="flex items-center justify-between text-xs">
-                <span className="font-mono text-gray-400">{short(addr)}</span>
+                <span className="font-mono text-gray-400">{name(addr)}</span>
                 <span className={`font-bold ${roleColors[role] || "text-gray-500"}`}>{role}</span>
               </div>
             ))}

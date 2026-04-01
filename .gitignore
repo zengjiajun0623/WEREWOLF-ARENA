@@ -10,3 +10,4 @@ agents/*/memory/
 # Foundry
 contracts/out/
 contracts/cache/
+.vercel
