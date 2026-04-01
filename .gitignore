@@ -1,0 +1,12 @@
+node_modules/
+dist/
+out/
+.next/
+cache/
+*.env
+transcripts/
+agents/*/memory/
+
+# Foundry
+contracts/out/
+contracts/cache/
